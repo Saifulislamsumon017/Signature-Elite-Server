@@ -50,6 +50,8 @@ async function run() {
       .db('signatureElite')
       .collection('wishlists');
 
+    const reviewsCollection = client.db('signatureElite').collection('reviews');
+
     // JWT issue route
     app.post('/jwt', async (req, res) => {
       try {
@@ -126,6 +128,18 @@ async function run() {
         res.send({ message: 'Added to wishlist' });
       } catch (error) {
         res.status(500).send({ message: 'Error adding to wishlist' });
+      }
+    });
+
+    // GET Reviews for Property:
+
+    app.get('/reviews', async (req, res) => {
+      try {
+        const propertyId = req.query.propertyId;
+        const reviews = await reviewsCollection.find({ propertyId }).toArray();
+        res.send(reviews);
+      } catch (error) {
+        res.status(500).send({ message: 'Error fetching reviews' });
       }
     });
 
