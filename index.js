@@ -22,6 +22,42 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
+    // const db = client.db('signatureElite');
+    const propertiesCollection = client
+      .db('signatureElite')
+      .collection('properties');
+
+    // Route: GET /all-properties
+    app.get('/all-properties', async (req, res) => {
+      try {
+        const { search = '', sort = '' } = req.query;
+
+        const query = {
+          verificationStatus: 'verified',
+        };
+
+        if (search) {
+          query.location = { $regex: search, $options: 'i' };
+        }
+
+        let sortOption = {};
+        if (sort === 'asc') {
+          sortOption.minPrice = 1;
+        } else if (sort === 'desc') {
+          sortOption.minPrice = -1;
+        }
+
+        const properties = await propertiesCollection
+          .find(query)
+          .sort(sortOption)
+          .toArray();
+
+        res.send(properties);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: 'Server error fetching properties' });
+      }
+    });
     // Send a ping to confirm a successful connection
     await client.db('admin').command({ ping: 1 });
     console.log(
