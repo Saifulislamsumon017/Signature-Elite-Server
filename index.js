@@ -143,6 +143,16 @@ async function run() {
       }
     });
 
+    app.post('/reviews', verifyJWT, async (req, res) => {
+      try {
+        const review = req.body;
+        await reviewsCollection.insertOne(review);
+        res.send({ message: 'Review added' });
+      } catch (error) {
+        res.status(500).send({ message: 'Error adding review' });
+      }
+    });
+
     await client.db('admin').command({ ping: 1 });
     console.log(
       'Pinged your deployment. You successfully connected to MongoDB!'
