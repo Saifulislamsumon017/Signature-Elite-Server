@@ -2,11 +2,28 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 require('dotenv').config();
+import jwt from 'jsonwebtoken';
 const port = process.env.PORT || 3000;
 const { MongoClient, ServerApiVersion } = require('mongodb');
-app.use(cors());
+app.use(
+  cors({
+    origin: ['http://localhost:5173'],
+    credentials: true,
+  })
+);
 app.use(express.json());
+app.use(cookieParser());
 
+// JWT middleware
+const verifyJWT = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).send({ message: 'Unauthorized' });
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) return res.status(401).send({ message: 'Forbidden' });
+    req.user = decoded;
+    next();
+  });
+};
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@signatureelite.z7ote26.mongodb.net/?retryWrites=true&w=majority&appName=SignatureElite`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
