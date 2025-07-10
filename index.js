@@ -46,6 +46,10 @@ async function run() {
       .db('signatureElite')
       .collection('properties');
 
+    const wishlistCollection = client
+      .db('signatureElite')
+      .collection('wishlists');
+
     // JWT issue route
     app.post('/jwt', async (req, res) => {
       try {
@@ -101,6 +105,27 @@ async function run() {
         res.send(property);
       } catch (error) {
         res.status(500).send({ message: 'Error fetching property' });
+      }
+    });
+
+    // GET and add to wishlist:
+    app.get('/wishlist', verifyJWT, async (req, res) => {
+      try {
+        const userEmail = req.query.userEmail;
+        const items = await wishlistCollection.find({ userEmail }).toArray();
+        res.send(items);
+      } catch (error) {
+        res.status(500).send({ message: 'Error fetching wishlist' });
+      }
+    });
+
+    app.post('/wishlist', verifyJWT, async (req, res) => {
+      try {
+        const item = req.body;
+        await wishlistCollection.insertOne(item);
+        res.send({ message: 'Added to wishlist' });
+      } catch (error) {
+        res.status(500).send({ message: 'Error adding to wishlist' });
       }
     });
 
