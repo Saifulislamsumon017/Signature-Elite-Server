@@ -1,10 +1,14 @@
 const express = require('express');
 const cors = require('cors');
-const app = express();
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
-import jwt from 'jsonwebtoken';
+
+const app = express();
 const port = process.env.PORT || 3000;
-const { MongoClient, ServerApiVersion } = require('mongodb');
+
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
 app.use(
   cors({
     origin: ['http://localhost:5173'],
@@ -24,9 +28,9 @@ const verifyJWT = (req, res, next) => {
     next();
   });
 };
+
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@signatureelite.z7ote26.mongodb.net/?retryWrites=true&w=majority&appName=SignatureElite`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -37,12 +41,24 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
-    // const db = client.db('signatureElite');
     const propertiesCollection = client
       .db('signatureElite')
       .collection('properties');
+
+    // JWT issue route
+    app.post('/jwt', async (req, res) => {
+      try {
+        const user = req.body;
+        const token = jwt.sign(user, process.env.JWT_SECRET, {
+          expiresIn: '7d',
+        });
+        res.send({ token });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: 'Error generating token' });
+      }
+    });
 
     // Route: GET /all-properties
     app.get('/all-properties', async (req, res) => {
@@ -75,13 +91,24 @@ async function run() {
         res.status(500).send({ message: 'Server error fetching properties' });
       }
     });
-    // Send a ping to confirm a successful connection
+
+    app.get('/property/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const property = await propertiesCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        res.send(property);
+      } catch (error) {
+        res.status(500).send({ message: 'Error fetching property' });
+      }
+    });
+
     await client.db('admin').command({ ping: 1 });
     console.log(
       'Pinged your deployment. You successfully connected to MongoDB!'
     );
   } finally {
-    // Ensures that the client will close when you finish/error
     // await client.close();
   }
 }
