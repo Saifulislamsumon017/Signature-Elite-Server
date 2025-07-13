@@ -105,12 +105,24 @@ async function run() {
       res.send(properties);
     });
 
+    // GET single property
     app.get('/property/:id', async (req, res) => {
       const id = req.params.id;
       const property = await propertiesCollection.findOne({
         _id: new ObjectId(id),
       });
       res.send(property);
+    });
+
+    // PATCH update property
+    app.patch('/property/:id', verifyJWT, async (req, res) => {
+      const id = req.params.id;
+      const update = req.body;
+      await propertiesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: update }
+      );
+      res.send({ message: 'Property updated' });
     });
 
     app.get('/advertised-properties', async (req, res) => {
@@ -230,6 +242,72 @@ async function run() {
       const id = req.params.id;
       const offer = await offersCollection.findOne({ _id: new ObjectId(id) });
       res.send(offer);
+    });
+
+    // ✅ Get agent's sold properties
+    app.get('/agent/:email/sold-properties', verifyJWT, async (req, res) => {
+      const agentEmail = req.params.email;
+      const soldOffers = await offersCollection
+        .find({ agentEmail, status: 'bought' })
+        .toArray();
+      res.send(soldOffers);
+    });
+
+    // GET offers for agent's properties
+    app.get('/agent/:email/offers', verifyJWT, async (req, res) => {
+      const agentEmail = req.params.email;
+
+      try {
+        const offers = await offersCollection.find({ agentEmail }).toArray();
+        res.send(offers);
+      } catch (error) {
+        res.status(500).send({ error: 'Failed to fetch offers' });
+      }
+    });
+
+    // PATCH update offer status and handle automatic rejection of other offers
+    app.patch('/offer/:id/status', verifyJWT, async (req, res) => {
+      const offerId = req.params.id;
+      const { status } = req.body;
+
+      if (!['accepted', 'rejected'].includes(status)) {
+        return res.status(400).send({ error: 'Invalid status' });
+      }
+
+      try {
+        // Update the selected offer status
+        await offersCollection.updateOne(
+          { _id: new ObjectId(offerId) },
+          { $set: { status } }
+        );
+
+        if (status === 'accepted') {
+          // Get the accepted offer to know the propertyId
+          const acceptedOffer = await offersCollection.findOne({
+            _id: new ObjectId(offerId),
+          });
+
+          // Reject all other offers for the same property (excluding the accepted one)
+          await offersCollection.updateMany(
+            {
+              propertyId: acceptedOffer.propertyId,
+              _id: { $ne: new ObjectId(offerId) },
+              status: 'pending',
+            },
+            { $set: { status: 'rejected' } }
+          );
+
+          // Also update the property status if you want (optional)
+          await propertiesCollection.updateOne(
+            { _id: new ObjectId(acceptedOffer.propertyId) },
+            { $set: { status: 'pending_payment' } } // or whatever status before payment
+          );
+        }
+
+        res.send({ message: 'Offer status updated' });
+      } catch (error) {
+        res.status(500).send({ error: 'Failed to update offer status' });
+      }
     });
 
     // ✅ Create Stripe Payment Intent
