@@ -9,12 +9,12 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// ✅ Middleware
+// Middleware
 app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
-// ✅ JWT Middleware
+// JWT middleware
 const verifyJWT = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).send({ message: 'Unauthorized' });
@@ -26,8 +26,7 @@ const verifyJWT = (req, res, next) => {
   });
 };
 
-// ✅ MongoDB Connection
-
+// MongoDB Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@signatureelite.z7ote26.mongodb.net/?retryWrites=true&w=majority&appName=SignatureElite`;
 
 const client = new MongoClient(uri, {
@@ -37,7 +36,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // await client.connect();
-    // console.log('✅ Connected to MongoDB');
+    console.log('✅ Connected to MongoDB');
 
     const db = client.db('signatureElite');
     const usersCollection = db.collection('users');
@@ -47,37 +46,42 @@ async function run() {
     const offersCollection = db.collection('offers');
 
     // --- AUTH ---
+    // JWT route - issue token
     app.post('/jwt', async (req, res) => {
       const { email } = req.body;
-      if (!email) return res.status(400).send({ message: 'Email required' });
-
-      // Find user in DB (or create default user role)
+      if (!email) return res.status(400).send({ message: 'Email is required' });
       const user = await usersCollection.findOne({ email });
-      const role = user?.role || 'user';
+      if (!user) return res.status(401).send({ message: 'Unauthorized' });
 
-      const token = jwt.sign({ email, role }, process.env.JWT_SECRET, {
-        expiresIn: '7d',
-      });
+      const token = jwt.sign(
+        { email: user.email, role: user.role || 'user' },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
       res.send({ token });
     });
-    // --- USER-ROLE ---
+    // --- USER ROLE ---
 
-    // ✅ Get user role by email
     app.get('/users/role', verifyJWT, async (req, res) => {
-      const email = req.query.email;
-      if (!email) return res.status(400).send({ message: 'Email required' });
+      const email = req.user.email;
 
-      const user = await usersCollection.findOne({ email });
-      if (!user) return res.status(404).send({ role: null });
+      if (!email)
+        return res.status(400).send({ message: 'Email not found in token' });
 
-      res.send({ role: user.role });
+      try {
+        const user = await usersCollection.findOne({ email });
+        if (!user) return res.status(404).send({ role: null });
+
+        res.send({ role: user.role });
+      } catch (err) {
+        res.status(500).send({ message: 'Error fetching user role' });
+      }
     });
-    // ✅ Store new user
+
     app.post('/users', async (req, res) => {
       const email = req.body.email;
       const userExists = await usersCollection.findOne({ email });
       if (userExists) {
-        // update last log in
         return res
           .status(200)
           .send({ message: 'User already exists', inserted: false });
@@ -88,6 +92,7 @@ async function run() {
     });
 
     // --- PROPERTIES ---
+
     app.get('/all-properties', async (req, res) => {
       const { search = '', sort = '' } = req.query;
       const query = { verificationStatus: 'verified' };
@@ -105,24 +110,13 @@ async function run() {
       res.send(properties);
     });
 
-    // GET single property
+    // Get single property details by ID - public or protected (your choice)
     app.get('/property/:id', async (req, res) => {
       const id = req.params.id;
       const property = await propertiesCollection.findOne({
         _id: new ObjectId(id),
       });
       res.send(property);
-    });
-
-    // PATCH update property
-    app.patch('/property/:id', verifyJWT, async (req, res) => {
-      const id = req.params.id;
-      const update = req.body;
-      await propertiesCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: update }
-      );
-      res.send({ message: 'Property updated' });
     });
 
     app.get('/advertised-properties', async (req, res) => {
@@ -133,77 +127,147 @@ async function run() {
       res.send(advertised);
     });
 
-    //✅ GET my properties
-    app.get('/properties/agent/:email', verifyJWT, async (req, res) => {
-      const email = req.params.email;
-      const properties = await propertiesCollection
-        .find({ agentEmail: email })
-        .toArray();
-      res.send(properties);
-    });
-
-    // DELETE
-    app.delete('/properties/:id', verifyJWT, async (req, res) => {
-      const id = req.params.id;
-      await propertiesCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send({ message: 'Deleted successfully' });
-    });
-
     // --- WISHLIST ---
-    app.post('/wishlist', verifyJWT, async (req, res) => {
-      const item = req.body;
-      await wishlistCollection.updateOne(
-        { userEmail: item.userEmail, propertyId: item.propertyId },
-        { $set: item },
-        { upsert: true }
-      );
-      res.send({ message: 'Added or updated in wishlist' });
+    // GET wishlist items for a user
+    // GET: Wishlist Items
+    app.get('/wishlist', async (req, res) => {
+      try {
+        const userEmail = req.query.userEmail;
+        if (!userEmail) {
+          return res.status(400).send({ message: 'userEmail is required' });
+        }
+
+        const items = await wishlistCollection.find({ userEmail }).toArray();
+        res.send(items);
+      } catch (error) {
+        console.error('Error fetching wishlist:', error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
     });
 
-    app.get('/wishlist', verifyJWT, async (req, res) => {
-      const userEmail = req.query.userEmail;
-      const items = await wishlistCollection.find({ userEmail }).toArray();
-      res.send(items);
+    // POST: Add to Wishlist
+    app.post('/wishlist', async (req, res) => {
+      const {
+        userEmail,
+        propertyId,
+        title,
+        image,
+        location,
+        minPrice,
+        maxPrice,
+        agentName,
+        agentImage,
+        verificationStatus,
+      } = req.body;
+
+      if (!userEmail || !propertyId) {
+        return res.status(400).send({ message: 'Missing required fields' });
+      }
+
+      try {
+        const exists = await wishlistCollection.findOne({
+          userEmail,
+          propertyId,
+        });
+        if (exists) {
+          return res.status(409).send({ message: 'Already in wishlist' });
+        }
+
+        const result = await wishlistCollection.insertOne({
+          userEmail,
+          propertyId,
+          title,
+          image,
+          location,
+          minPrice,
+          maxPrice,
+          agentName,
+          agentImage,
+          verificationStatus,
+          createdAt: new Date(),
+        });
+
+        res.send({ success: true, insertedId: result.insertedId });
+      } catch (error) {
+        console.error('Error adding to wishlist:', error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
     });
 
-    app.delete('/wishlist/:id', verifyJWT, async (req, res) => {
-      const id = req.params.id;
-      await wishlistCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send({ message: 'Deleted from wishlist' });
+    // DELETE: Remove from Wishlist
+    app.delete('/wishlist/:propertyId', verifyJWT, async (req, res) => {
+      try {
+        const propertyId = req.params.propertyId;
+        const userEmail = req.query.userEmail;
+
+        if (!propertyId || !userEmail) {
+          return res
+            .status(400)
+            .send({ message: 'propertyId and userEmail required' });
+        }
+
+        const result = await wishlistCollection.deleteOne({
+          _id: new ObjectId(propertyId),
+          userEmail,
+        });
+
+        console.log(result);
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ message: 'Wishlist item not found' });
+        }
+
+        res.send({ message: 'Wishlist item removed' });
+      } catch (error) {
+        console.error('Error removing wishlist item:', error);
+        res.status(500).send({ message: 'Server error' });
+      }
     });
 
     // --- REVIEWS ---
+
+    // GET reviews for a property by propertyId
     app.get('/reviews', async (req, res) => {
-      const { propertyId } = req.query;
-      const query = propertyId ? { propertyId } : {};
-      const cursor = reviewsCollection.find(query).sort({ createdAt: -1 });
-      if (!propertyId) cursor.limit(3);
-      const reviews = await cursor.toArray();
-      res.send(reviews);
-    });
+      try {
+        const propertyId = req.query.propertyId;
+        if (!propertyId) {
+          return res.status(400).send({ message: 'propertyId is required' });
+        }
 
-    app.post('/reviews', verifyJWT, async (req, res) => {
-      const review = req.body;
-      review.createdAt = new Date();
-      await reviewsCollection.insertOne(review);
-      res.send({ message: 'Review added' });
-    });
+        // If you store propertyId as string in reviews collection:
+        const reviews = await reviewsCollection
+          .find({ propertyId })
+          .sort({ createdAt: -1 })
+          .toArray();
 
-    // ✅ Get my reviews (only this user's)
-    app.get('/my-reviews', verifyJWT, async (req, res) => {
-      const userEmail = req.query.userEmail;
-      if (!userEmail) {
-        return res
-          .status(400)
-          .send({ error: 'userEmail query parameter required' });
+        res.send(reviews);
+      } catch (error) {
+        console.error('Error fetching reviews:', error);
+        res.status(500).send({ message: 'Internal server error' });
       }
+    });
 
-      const reviews = await reviewsCollection
-        .find({ userEmail })
-        .sort({ createdAt: -1 })
-        .toArray();
+    // POST add a new review (protected)
+    app.post('/reviews', verifyJWT, async (req, res) => {
+      try {
+        const review = req.body;
+        if (
+          !review.propertyId ||
+          !review.userEmail ||
+          !review.comment ||
+          !review.rating
+        ) {
+          return res.status(400).send({ message: 'Missing required fields' });
+        }
 
-      res.send(reviews);
+        review.createdAt = new Date();
+
+        const result = await reviewsCollection.insertOne(review);
+        res.send(result);
+      } catch (error) {
+        console.error('Error adding review:', error);
+        res.status(500).send({ message: 'Failed to add review' });
+      }
     });
 
     app.get('/latest-reviews', async (req, res) => {
@@ -217,100 +281,80 @@ async function run() {
 
     // --- OFFERS ---
 
-    app.post('/offers', verifyJWT, async (req, res) => {
-      const offer = req.body;
-      offer.status = 'pending';
-      await offersCollection.insertOne(offer);
-      res.send({ message: 'Offer saved' });
-    });
-
-    // ✅ Get all offers for a buyer (user)
     app.get('/offers', verifyJWT, async (req, res) => {
-      const buyerEmail = req.query.buyerEmail;
-      if (!buyerEmail) {
-        return res
-          .status(400)
-          .send({ error: 'buyerEmail query parameter required' });
-      }
-
-      const results = await offersCollection.find({ buyerEmail }).toArray();
-
-      res.send(results);
-    });
-
-    app.get('/offer/:id', verifyJWT, async (req, res) => {
-      const id = req.params.id;
-      const offer = await offersCollection.findOne({ _id: new ObjectId(id) });
-      res.send(offer);
-    });
-
-    // ✅ Get agent's sold properties
-    app.get('/agent/:email/sold-properties', verifyJWT, async (req, res) => {
-      const agentEmail = req.params.email;
-      const soldOffers = await offersCollection
-        .find({ agentEmail, status: 'bought' })
-        .toArray();
-      res.send(soldOffers);
-    });
-
-    // GET offers for agent's properties
-    app.get('/agent/:email/offers', verifyJWT, async (req, res) => {
-      const agentEmail = req.params.email;
-
       try {
-        const offers = await offersCollection.find({ agentEmail }).toArray();
+        const userEmail = req.query.userEmail;
+        if (!userEmail) {
+          return res.status(400).send({ message: 'userEmail is required' });
+        }
+
+        const offers = await offersCollection.find({ userEmail }).toArray();
         res.send(offers);
       } catch (error) {
-        res.status(500).send({ error: 'Failed to fetch offers' });
+        console.error('Error fetching offers:', error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+    // POST /offers
+    app.post('/offers', verifyJWT, async (req, res) => {
+      try {
+        const {
+          userEmail,
+          propertyId,
+          offerAmount,
+          message,
+          propertyTitle,
+          agentEmail, // if available
+        } = req.body;
+
+        if (!userEmail || !propertyId || !offerAmount) {
+          return res.status(400).send({ message: 'Missing required fields' });
+        }
+
+        const offerData = {
+          userEmail,
+          propertyId,
+          offerAmount,
+          message: message || '',
+          propertyTitle,
+          agentEmail: agentEmail || null,
+          status: 'pending', // default status
+          timestamp: new Date(),
+        };
+
+        const result = await offersCollection.insertOne(offerData);
+
+        res.send({ success: true, insertedId: result.insertedId });
+      } catch (error) {
+        console.error('Error submitting offer:', error);
+        res.status(500).send({ message: 'Internal server error' });
       }
     });
 
-    // PATCH update offer status and handle automatic rejection of other offers
-    app.patch('/offer/:id/status', verifyJWT, async (req, res) => {
-      const offerId = req.params.id;
-      const { status } = req.body;
-
-      if (!['accepted', 'rejected'].includes(status)) {
-        return res.status(400).send({ error: 'Invalid status' });
-      }
-
+    // PATCH: Update offer status (accept or reject)
+    app.patch('/offers/:id', verifyJWT, async (req, res) => {
       try {
-        // Update the selected offer status
-        await offersCollection.updateOne(
+        const offerId = req.params.id;
+        const { status } = req.body; // expected: 'accepted' or 'rejected'
+
+        if (!['accepted', 'rejected'].includes(status)) {
+          return res.status(400).send({ message: 'Invalid status' });
+        }
+
+        const result = await offersCollection.updateOne(
           { _id: new ObjectId(offerId) },
           { $set: { status } }
         );
 
-        if (status === 'accepted') {
-          // Get the accepted offer to know the propertyId
-          const acceptedOffer = await offersCollection.findOne({
-            _id: new ObjectId(offerId),
-          });
-
-          // Reject all other offers for the same property (excluding the accepted one)
-          await offersCollection.updateMany(
-            {
-              propertyId: acceptedOffer.propertyId,
-              _id: { $ne: new ObjectId(offerId) },
-              status: 'pending',
-            },
-            { $set: { status: 'rejected' } }
-          );
-
-          // Also update the property status if you want (optional)
-          await propertiesCollection.updateOne(
-            { _id: new ObjectId(acceptedOffer.propertyId) },
-            { $set: { status: 'pending_payment' } } // or whatever status before payment
-          );
-        }
-
-        res.send({ message: 'Offer status updated' });
+        res.send({ success: result.modifiedCount > 0 });
       } catch (error) {
-        res.status(500).send({ error: 'Failed to update offer status' });
+        console.error('Error updating offer status:', error);
+        res.status(500).send({ message: 'Internal server error' });
       }
     });
 
-    // ✅ Create Stripe Payment Intent
+    // --- STRIPE PAYMENT ---
+
     app.post('/create-payment-intent', verifyJWT, async (req, res) => {
       const { amount } = req.body;
       if (!amount || amount < 1)
@@ -329,28 +373,14 @@ async function run() {
       }
     });
 
-    // ✅ Mark offer as bought after payment
-    app.patch('/offer/:id/pay', verifyJWT, async (req, res) => {
-      const id = req.params.id;
-      const { transactionId } = req.body;
-
-      if (!transactionId) {
-        return res.status(400).send({ error: 'Transaction ID required' });
-      }
-
-      await offersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: 'bought', transactionId } }
-      );
-
-      res.send({ message: 'Payment recorded successfully' });
-    });
+    // Direct purchase endpoint
 
     console.log('✅ Server ready');
   } finally {
-    // No client.close() to keep server running
+    // keep server running
   }
 }
+
 run().catch(console.dir);
 
 app.get('/', (req, res) => {
