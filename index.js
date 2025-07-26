@@ -22,6 +22,7 @@ const verifyJWT = (req, res, next) => {
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) return res.status(401).send({ message: 'Forbidden' });
     req.user = decoded;
+    console.log(decoded);
     next();
   });
 };
@@ -45,6 +46,24 @@ async function run() {
     const reviewsCollection = db.collection('reviews');
     const offersCollection = db.collection('offers');
 
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.user?.email;
+
+      console.log(email);
+      if (!email) {
+        return res.status(403).send({ message: 'Forbidden' });
+      }
+
+      const user = await db.collection('users').findOne({ email });
+
+      if (user?.role !== 'admin') {
+        return res
+          .status(403)
+          .send({ message: 'Access denied. Not an admin.' });
+      }
+
+      next();
+    };
     // --- AUTH ---
     // JWT route - issue token
     app.post('/jwt', async (req, res) => {
@@ -91,23 +110,137 @@ async function run() {
       res.send(result);
     });
 
+    // ---  GET All ADMIN---
+
+    app.get('/admin/users', verifyJWT, verifyAdmin, async (req, res) => {
+      const users = await usersCollection.find().toArray();
+      res.send(users);
+    });
+
+    app.patch(
+      '/admin/users/:id/role',
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const { id } = req.params;
+        const { role } = req.body;
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role } }
+        );
+        res.send(result);
+      }
+    );
+
+    // Mark user as fraud
+    app.patch(
+      '/admin/users/:id/fraud',
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const { id } = req.params;
+        const { isFraud } = req.body; // true/false to mark fraud
+
+        try {
+          // Update the fraud status of the user
+          const result = await usersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { isFraud } }
+          );
+
+          // Check if user was found and updated
+          if (result.matchedCount === 0) {
+            return res.status(404).send({ message: 'User not found' });
+          }
+
+          // If user is marked as fraud, delete their properties from the all-properties view
+          if (isFraud) {
+            await propertiesCollection.deleteMany({
+              agentEmail: (
+                await usersCollection.findOne({ _id: new ObjectId(id) })
+              ).email,
+            });
+          }
+
+          res.send({
+            message: `User fraud status updated to ${
+              isFraud ? 'fraud' : 'not fraud'
+            }`,
+          });
+        } catch (error) {
+          console.error('Error marking user as fraud:', error);
+          res.status(500).send({ message: 'Failed to update fraud status' });
+        }
+      }
+    );
+
+    // DELETE user
+    app.delete('/admin/users/:id', verifyJWT, verifyAdmin, async (req, res) => {
+      const result = await usersCollection.deleteOne({
+        _id: new ObjectId(req.params.id),
+      });
+      res.send(result);
+    });
+
+    app.get('/admin/reviews', verifyJWT, verifyAdmin, async (req, res) => {
+      const reviews = await reviewsCollection.find().toArray();
+      res.send(reviews);
+    });
+
+    app.delete(
+      '/admin/reviews/:id',
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const result = await reviewsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send(result);
+      }
+    );
+
     // --- PROPERTIES ---
 
     app.get('/all-properties', async (req, res) => {
       const { search = '', sort = '' } = req.query;
+
+      // Query to find verified properties
       const query = { verificationStatus: 'verified' };
 
+      // Search filter for location
       if (search) query.location = { $regex: search, $options: 'i' };
 
+      // Sort option based on query parameter
       let sortOption = {};
       if (sort === 'asc') sortOption.minPrice = 1;
       if (sort === 'desc') sortOption.minPrice = -1;
 
-      const properties = await propertiesCollection
-        .find(query)
-        .sort(sortOption)
-        .toArray();
-      res.send(properties);
+      try {
+        // Fetch users who are not marked as fraud
+        const agents = await usersCollection
+          .find({ role: 'agent', isFraud: { $ne: true } }) // exclude fraud agents
+          .project({ email: 1 }) // only email field is required
+          .toArray();
+
+        // Get valid emails (agents who are not fraud)
+        const validEmails = agents.map(agent => agent.email);
+
+        // Add a filter for properties added by valid agents only
+        query.agentEmail = { $in: validEmails };
+
+        // Fetch properties from the collection that match the query
+        const properties = await propertiesCollection
+          .find(query)
+          .sort(sortOption)
+          .toArray();
+
+        // Send properties as response
+        res.send(properties);
+      } catch (error) {
+        console.error('Error fetching properties:', error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
     });
 
     // Get single property details by ID - public or protected (your choice)
@@ -125,6 +258,101 @@ async function run() {
         .limit(4)
         .toArray();
       res.send(advertised);
+    });
+
+    app.delete('/properties/:id', verifyJWT, async (req, res) => {
+      const id = req.params.id;
+      try {
+        const result = await propertiesCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        if (result.deletedCount === 1) {
+          res.send({ success: true });
+        } else {
+          res.status(404).send({ error: 'Property not found' });
+        }
+      } catch (error) {
+        res.status(500).send({ error: 'Failed to delete property.' });
+      }
+    });
+
+    // --- AGENTS PROPERTY GET ---
+
+    // ▶️ POST /properties - Add Property
+
+    app.post('/properties', verifyJWT, async (req, res) => {
+      const userEmail = req.user.email;
+
+      try {
+        // Fetch the agent by email to check if they are fraud
+        const agent = await usersCollection.findOne({ email: userEmail });
+
+        // Check if the agent exists and if they are marked as fraud
+        if (!agent || agent.role !== 'agent' || agent.isFraud) {
+          return res
+            .status(403)
+            .send({ message: 'Forbidden: Fraud agent cannot add properties' });
+        }
+
+        const property = req.body;
+
+        // Ensure required fields are provided
+        if (!property?.agentEmail || !property?.title) {
+          return res.status(400).send({ message: 'Missing required fields' });
+        }
+
+        // Insert the property into the database
+        const result = await propertiesCollection.insertOne(property);
+        res.send(result);
+      } catch (error) {
+        console.error('Error adding property:', error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
+    // PATCH /properties/:id - Update Property
+    app.patch('/properties/:id', verifyJWT, async (req, res) => {
+      const { id } = req.params;
+      const updatedData = req.body;
+
+      if (!updatedData.title || !updatedData.location) {
+        return res
+          .status(400)
+          .send({ message: 'Title and Location are required.' });
+      }
+
+      try {
+        const result = await propertiesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              ...updatedData,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: 'Property not found' });
+        }
+
+        res.send({ message: 'Property updated successfully', result });
+      } catch (error) {
+        console.error('Error updating property:', error);
+        res.status(500).send({ message: 'Failed to update property' });
+      }
+    });
+
+    app.get('/properties/agent/:email', verifyJWT, async (req, res) => {
+      const email = req.params.email;
+      try {
+        const properties = await propertiesCollection
+          .find({ agentEmail: email })
+          .toArray();
+        res.send(properties);
+      } catch (error) {
+        res.status(500).send({ error: 'Failed to fetch properties.' });
+      }
     });
 
     // --- WISHLIST ---
@@ -333,46 +561,186 @@ async function run() {
 
     // PATCH: Update offer status (accept or reject)
     app.patch('/offers/:id', verifyJWT, async (req, res) => {
-      try {
-        const offerId = req.params.id;
-        const { status } = req.body; // expected: 'accepted' or 'rejected'
+      const id = req.params.id;
+      const { status, transactionId } = req.body;
 
-        if (!['accepted', 'rejected'].includes(status)) {
-          return res.status(400).send({ message: 'Invalid status' });
+      try {
+        const targetOffer = await offersCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!targetOffer)
+          return res.status(404).send({ error: 'Offer not found' });
+
+        if (status === 'accepted') {
+          // Accept this offer
+          await offersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { status } }
+          );
+
+          // Reject others for the same property
+          await offersCollection.updateMany(
+            {
+              _id: { $ne: new ObjectId(id) },
+              propertyId: targetOffer.propertyId,
+              status: 'pending',
+            },
+            { $set: { status: 'rejected' } }
+          );
+
+          return res.send({ success: true });
         }
 
-        const result = await offersCollection.updateOne(
-          { _id: new ObjectId(offerId) },
+        // For payment update (from checkout)
+        if (status === 'paid') {
+          await offersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { status, transactionId } }
+          );
+          return res.send({ success: true });
+        }
+
+        // Otherwise: update status directly
+        await offersCollection.updateOne(
+          { _id: new ObjectId(id) },
           { $set: { status } }
         );
 
-        res.send({ success: result.modifiedCount > 0 });
+        res.send({ success: true });
       } catch (error) {
         console.error('Error updating offer status:', error);
-        res.status(500).send({ message: 'Internal server error' });
+        res.status(500).send({ error: 'Internal server error' });
       }
     });
+
+    // --- USERS PROPERTY-BOUGHT ---
+
+    app.get('/bought-properties', verifyJWT, async (req, res) => {
+      const email = req.query.email;
+      if (!email) return res.status(400).send({ error: 'Email is required' });
+
+      try {
+        const query = { userEmail: email, status: 'paid' };
+        const boughtOffers = await offersCollection.find(query).toArray();
+        res.send(boughtOffers);
+      } catch (error) {
+        console.error('Error fetching bought properties:', error);
+        res.status(500).send({ error: 'Internal server error' });
+      }
+    });
+
+    // --- AGENTS SOLD PROPERTY ---
+
+    app.get('/sold-properties', verifyJWT, async (req, res) => {
+      const email = req.query.email;
+      if (!email)
+        return res.status(400).send({ error: 'Agent email required' });
+
+      try {
+        // Find all properties posted by this agent
+        const agentProperties = await propertiesCollection
+          .find({ agentEmail: email })
+          .toArray();
+
+        const propertyIds = agentProperties.map(p => p._id);
+
+        // Find all offers that were paid for these properties
+        const soldOffers = await offersCollection
+          .find({
+            propertyId: { $in: propertyIds },
+            status: 'paid',
+          })
+          .toArray();
+
+        res.send(soldOffers);
+      } catch (error) {
+        console.error('Error fetching sold properties:', error);
+        res.status(500).send({ error: 'Internal server error' });
+      }
+    });
+
+    // --- AGENTS REQUEST PROPERTY PROPERTY ---
+
+    app.get('/requested-properties', verifyJWT, async (req, res) => {
+      const email = req.query.email;
+      if (!email)
+        return res.status(400).send({ error: 'Agent email required' });
+
+      try {
+        const agentProperties = await propertiesCollection
+          .find({ agentEmail: email })
+          .toArray();
+
+        const propertyIds = agentProperties.map(p => p._id);
+
+        const offers = await offersCollection
+          .find({ propertyId: { $in: propertyIds }, status: 'pending' })
+          .toArray();
+
+        res.send(offers);
+      } catch (error) {
+        console.error('Error fetching requested properties:', error);
+        res.status(500).send({ error: 'Internal server error' });
+      }
+    });
+
+    // GET ALL PROPERTIES (FOR ADMIN VIEW )
+    app.get('/admin/properties', verifyJWT, verifyAdmin, async (req, res) => {
+      try {
+        const result = await db.collection('properties').find().toArray();
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: 'Failed to fetch properties' });
+      }
+    });
+
+    // PATCH: UPDATE VERIFICATION STATUS (FOR ADMIN)
+    app.patch(
+      '/admin/properties/:id/status',
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const { id } = req.params;
+        const { status } = req.body; // "verified" or "rejected"
+        try {
+          const result = await db
+            .collection('properties')
+            .updateOne(
+              { _id: new ObjectId(id) },
+              { $set: { verificationStatus: status } }
+            );
+
+          res.send(result);
+        } catch (err) {
+          res.status(500).send({ error: 'Failed to update status' });
+        }
+      }
+    );
 
     // --- STRIPE PAYMENT ---
 
     app.post('/create-payment-intent', verifyJWT, async (req, res) => {
       const { amount } = req.body;
-      if (!amount || amount < 1)
-        return res.status(400).send({ error: 'Invalid amount' });
+
+      if (!amount) {
+        return res.status(400).send({ error: 'Amount is required' });
+      }
 
       try {
         const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(amount * 100),
+          amount: parseInt(amount) * 100, // convert to cents
           currency: 'usd',
           payment_method_types: ['card'],
         });
-        res.send({ clientSecret: paymentIntent.client_secret });
+
+        res.send({
+          clientSecret: paymentIntent.client_secret,
+        });
       } catch (error) {
-        console.error('Stripe error:', error);
-        res.status(500).send({ error: 'Payment intent creation failed' });
+        console.error('Error creating payment intent:', error);
+        res.status(500).send({ error: 'Internal server error' });
       }
     });
-
     // Direct purchase endpoint
 
     console.log('✅ Server ready');
