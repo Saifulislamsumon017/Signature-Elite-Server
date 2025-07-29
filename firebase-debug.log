@@ -1,0 +1,46 @@
+[debug] [2025-07-29T13:54:19.662Z] ----------------------------------------------------------------------
+[debug] [2025-07-29T13:54:19.664Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\singm\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js init
+[debug] [2025-07-29T13:54:19.664Z] CLI Version:   14.7.0
+[debug] [2025-07-29T13:54:19.665Z] Platform:      win32
+[debug] [2025-07-29T13:54:19.665Z] Node Version:  v22.12.0
+[debug] [2025-07-29T13:54:19.665Z] Time:          Tue Jul 29 2025 19:54:19 GMT+0600 (Bangladesh Standard Time)
+[debug] [2025-07-29T13:54:19.665Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-07-29T13:54:19.670Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-07-29T13:54:19.671Z] > authorizing via signed-in user (saifulislam.msi169@gmail.com)
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  G:\Signature Elite\Signature Elite-Server
+
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] but for now we'll just set up a default project.
+[info] 
+[debug] [2025-07-29T13:54:52.094Z] Checked if tokens are valid: true, expires at: 1753800824893
+[debug] [2025-07-29T13:54:52.095Z] Checked if tokens are valid: true, expires at: 1753800824893
+[debug] [2025-07-29T13:54:52.096Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=100
+[debug] [2025-07-29T13:54:52.938Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2025-07-29T13:54:52.938Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] i  Using project signature-elite (Signature Elite) 
+[info] 
+=== Hosting Setup
+[debug] [2025-07-29T13:55:00.594Z] Checked if tokens are valid: true, expires at: 1753800824893
+[debug] [2025-07-29T13:55:00.594Z] Checked if tokens are valid: true, expires at: 1753800824893
+[debug] [2025-07-29T13:55:00.594Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/signature-elite [none]
+[debug] [2025-07-29T13:55:01.408Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/signature-elite 200
+[debug] [2025-07-29T13:55:01.408Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/signature-elite {"projectId":"signature-elite","projectNumber":"527741203720","displayName":"Signature Elite","name":"projects/signature-elite","resources":{"hostingSite":"signature-elite"},"state":"ACTIVE","etag":"1_200a051b-c25c-4c8d-b60a-34c9e89e5023"}
+[info] 
+[info] Your public directory is the folder (relative to your project directory) that
+[info] will contain Hosting assets to be uploaded with firebase deploy. If you
+[info] have a build process for your assets, use your build's output directory.
+[info] 
