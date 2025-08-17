@@ -138,6 +138,23 @@ async function run() {
         res.status(500).send({ message: 'Internal server error' });
       }
     });
+
+    // GET /user-stats
+    app.get('/user-stats', verifyJWT, async (req, res) => {
+      const email = req.user.email;
+
+      const wishlistCount = await wishlistCollection.countDocuments({ email });
+      const offers = await offersCollection.find({ email }).toArray();
+      const boughtCount = offers.filter(o => o.status === 'paid').length;
+      const reviewsCount = await reviewsCollection.countDocuments({ email });
+
+      res.send({
+        wishlist: wishlistCount,
+        offers: offers.length,
+        bought: boughtCount,
+        reviews: reviewsCount,
+      });
+    });
     // --- USER ROLE ---
 
     app.get('/users/role', verifyJWT, async (req, res) => {
