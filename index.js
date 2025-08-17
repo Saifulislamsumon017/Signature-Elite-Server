@@ -111,6 +111,33 @@ async function run() {
         res.status(500).send({ message: 'Internal server error' });
       }
     });
+
+    // === Agent Statistics ===
+    app.get('/agent-stats', verifyJWT, async (req, res) => {
+      const email = req.user.email;
+
+      try {
+        const totalProperties = await propertiesCollection.countDocuments({
+          agentEmail: email,
+        });
+        const soldProperties = await offersCollection.countDocuments({
+          agentEmail: email,
+          status: 'paid',
+        });
+        const offersReceived = await offersCollection.countDocuments({
+          agentEmail: email,
+        });
+
+        res.send({
+          totalProperties,
+          soldProperties,
+          offersReceived,
+        });
+      } catch (err) {
+        console.error('Agent stats error:', err);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
     // --- USER ROLE ---
 
     app.get('/users/role', verifyJWT, async (req, res) => {
