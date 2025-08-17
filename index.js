@@ -12,10 +12,7 @@ const port = process.env.PORT || 3000;
 // Middleware
 app.use(
   cors({
-    origin: [
-      'http://localhost:5173',
-      'https://signature-elite-server.vercel.app',
-    ],
+    origin: ['http://localhost:5173', 'https://signature-elite.web.app'],
     credentials: true,
   })
 );
@@ -87,6 +84,32 @@ async function run() {
         { expiresIn: '7d' }
       );
       res.send({ token });
+    });
+
+    // === Admin Statistics ===
+    app.get('/admin-stats', verifyJWT, async (req, res) => {
+      try {
+        const totalUsers = await usersCollection.countDocuments();
+        const totalAgents = await usersCollection.countDocuments({
+          role: 'agent',
+        });
+        const totalProperties = await propertiesCollection.countDocuments();
+        const totalReviews = await reviewsCollection.countDocuments();
+        const soldProperties = await offersCollection.countDocuments({
+          status: 'paid',
+        });
+
+        res.send({
+          totalUsers,
+          totalAgents,
+          totalProperties,
+          totalReviews,
+          soldProperties,
+        });
+      } catch (err) {
+        console.error('Admin stats error:', err);
+        res.status(500).send({ message: 'Internal server error' });
+      }
     });
     // --- USER ROLE ---
 
